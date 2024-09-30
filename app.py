@@ -7,6 +7,31 @@ from qa_search import basic_ocr_search, advanced_qa_search, load_models
 import time
 import json
 
+# Utility functions for file-based state management
+def save_state(file_name, data):
+    """Safely save the OCR state to a file."""
+    tmp_file = file_name + ".tmp"
+    with open(tmp_file, 'w') as file:
+        json.dump(data, file)
+    os.rename(tmp_file, file_name)
+
+def load_state(file_name):
+    """Load the OCR state from a file."""
+    if os.path.exists(file_name):
+        try:
+            with open(file_name, 'r') as file:
+                file_content = file.read().strip()
+                if file_content:
+                    return json.loads(file_content)
+                else:
+                    print("Warning: The file is empty. Initializing default state.")
+                    return {"combined_text": "", "file_path": "", "extracted_texts": None}  # Return a default state
+        except json.JSONDecodeError:
+            print("Error: Corrupted JSON. Reinitializing state.")
+            return {"combined_text": "", "file_path": "", "extracted_texts": None}  # Return a default state
+    return {"combined_text": "", "file_path": "", "extracted_texts": None}  # File doesn't exist, return default
+
+
 # Custom CSS to style the app
 st.markdown("""
     <style>
@@ -20,6 +45,7 @@ st.markdown("""
         padding: 10px;
         border: 2px solid #ddd;
         border-radius: 10px;
+         height: 400px;
         background-color: #fff;
     }
     .search-box {
@@ -46,6 +72,15 @@ if uploaded_file is not None:
     else:
         st.sidebar.warning("Preview is only available for image files (PNG, JPG, JPEG).")
 
+# Load saved state if exists
+ocr_state = load_state("ocr_state.json") or {"combined_text": "", "file_path": "", "extracted_texts": None}
+
+# Add a "Clear" button to reset the OCR text and state
+if st.button("🧹 Clear", key="clear_button", help="Clear OCR Text and Uploaded File"):
+    ocr_state = {"combined_text": "", "file_path": "", "extracted_texts": None}
+    save_state("ocr_state.json", ocr_state)
+    st.experimental_rerun()  # Force refresh to clear the interface
+
 # Language selection in sidebar
 language = st.sidebar.radio("🌐 Select Language for Extraction", ('📖 English', '🇮🇳 Hindi', '🌍 Multilingual'))
 
@@ -54,10 +89,6 @@ start_ocr = st.sidebar.button("🚀 Start OCR Processing")
 
 # Search Type selection
 search_type = st.sidebar.radio("Search Type", ('🔍 Basic Search', '💡 Advanced QA Search'))
-
-# Placeholder for extracted text and combined_text in session state
-combined_text = st.session_state.get('combined_text', "")
-file_path = st.session_state.get('file_path', "")
 
 # Perform OCR and Display Results
 if start_ocr and uploaded_file is not None:
@@ -78,29 +109,37 @@ if start_ocr and uploaded_file is not None:
 
     # Post-process the extracted text
     combined_text = postprocess_texts(extracted_texts)
-    st.session_state['combined_text'] = combined_text
-    st.session_state['file_path'] = file_path
+
+    # Save to file-based state
+    ocr_state = {
+        "combined_text": combined_text,
+        "file_path": file_path,
+        "extracted_texts": extracted_texts
+    }
+    save_state("ocr_state.json", ocr_state)
 
 # Main Screen: OCR Text Output and Search Functionality
 st.subheader("📝 OCR Text Output")
 
-# Show OCR text only if available
-if combined_text:
+# Only show the OCR text area if there's actual content
+if ocr_state['combined_text']:
     st.markdown('<div class="output-box">', unsafe_allow_html=True)
-    st.text_area("Extracted OCR Text", value=combined_text, height=300)
+    st.text_area("Extracted OCR Text", value=ocr_state['combined_text'], height=300)
     st.markdown('</div>', unsafe_allow_html=True)
+else:
+    st.info("No OCR text to display. Please upload a document and start the OCR process.")
 
 # Search functionality
 if search_type == '🔍 Basic Search':
     st.markdown('<h3>🔍 Basic Search in OCR Text</h3>', unsafe_allow_html=True)
     search_query = st.text_input("Search for specific words/phrases in the extracted text", value="")
-    
+
     # Search Type Options
     search_mode = st.selectbox("Select Search Mode", ["Exact", "Fuzzy", "Case-Insensitive", "Wildcard", "Regex"])
 
     # Perform the basic search when search button is clicked
-    if st.button("🔍 Search Text") and combined_text:
-        search_results = basic_ocr_search(extracted_texts, search_query, search_type=search_mode.lower())
+    if st.button("🔍 Search Text") and ocr_state['combined_text']:
+        search_results = basic_ocr_search(ocr_state['extracted_texts'], search_query, search_type=search_mode.lower())
         st.write(search_results if search_results else "No results found.")
 
 elif search_type == '💡 Advanced QA Search':
@@ -108,28 +147,28 @@ elif search_type == '💡 Advanced QA Search':
     qa_query = st.text_input("Ask a question about the document", value="")
 
     # Load models if a question is asked
-    if st.button("💡 Run QA Search") and qa_query and file_path:
+    if st.button("💡 Run QA Search") and qa_query and ocr_state['file_path']:
         # Load the QA models
         RAG, qwen_model, qwen_processor = load_models()
-        
+
         # Perform advanced QA search
-        answer = advanced_qa_search(file_path, qa_query, RAG, qwen_model, qwen_processor)
+        answer = advanced_qa_search(ocr_state['file_path'], qa_query, RAG, qwen_model, qwen_processor)
         st.write(answer)
 
 # Download Options
-if combined_text:
+if ocr_state['combined_text']:
     st.subheader("💾 Download Options")
-    
+
     output_format = st.radio("Select Download Format", ('📄 Plain-Text', '🗃️ JSON'))
 
     if output_format == "📄 Plain-Text":
         st.download_button(
             label="💾 Download as Text",
-            data=combined_text,
+            data=ocr_state['combined_text'],
             file_name="extracted_text.txt"
         )
     elif output_format == "🗃️ JSON":
-        json_data = {"combined_text": combined_text}
+        json_data = {"combined_text": ocr_state['combined_text']}
         st.download_button(
             label="💾 Download as JSON",
             data=json.dumps(json_data, ensure_ascii=False, indent=4),

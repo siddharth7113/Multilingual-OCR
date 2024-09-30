@@ -6,7 +6,6 @@ from docx import Document
 from transformers import Qwen2VLForConditionalGeneration, AutoProcessor
 import torch
 
-
 def load_model():
     """Load the Qwen2VL model and processor only when a GPU is available."""
     if torch.cuda.is_available():
@@ -48,7 +47,7 @@ def docx_to_images(docx_path, output_folder):
 
 def process_document(file_path, extraction_mode="english"):
     """Process the document using output_images directory."""
-     # Load the model and processor
+    # Load the cached model and processor
     model, processor = load_model()
     
     # Check if the model is loaded successfully
@@ -71,6 +70,7 @@ def process_document(file_path, extraction_mode="english"):
     extracted_texts = []
     for image_file in image_files:
         image = Image.open(image_file)
+
         if extraction_mode == "english":
             extracted_text = extract_text_english(image, processor, model)
         elif extraction_mode == "hindi":
